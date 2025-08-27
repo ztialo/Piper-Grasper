@@ -7,9 +7,12 @@ import isaaclab.utils.math as math_utils
 import math
 import torch
 
-mass_props = schemas_cfg.MassPropertiesCfg(density=49.0)
-rigid_props = schemas_cfg.RigidBodyPropertiesCfg()
-collision_props = schemas_cfg.CollisionPropertiesCfg()
+mass_props = schemas_cfg.MassPropertiesCfg(density=200.0)
+rigid_props = schemas_cfg.RigidBodyPropertiesCfg(
+    rigid_body_enabled=False,
+    kinematic_enabled=False,
+)
+collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=True)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 mesh_path = os.path.join(script_dir, "..", "..", "..", "assets", "workDesk_v1", "workDesk_v1.stl")

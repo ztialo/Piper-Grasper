@@ -46,8 +46,12 @@ def design_scene() -> tuple[dict, list[list[float]], tuple[float]]:
     desk_cfg = sim_utils.UsdFileCfg(usd_path=desk_converter.usd_path)
     desk_cfg.func("/World/DeskOrigin/Desk", desk_cfg)
 
+    visual_material_cfg = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.6, 0.533, 0.3))
+    visual_material_cfg.func("/World/Looks/DeskMaterial", visual_material_cfg)
+    sim_utils.bind_visual_material("/World/DeskOrigin/Desk", "/World/Looks/DeskMaterial")
+
     # Articulation
-    piper_origins = [[0.1, 0.255, 0.79], [-0.5, 0.255, 0.79]]
+    piper_origins = [[0.1, 0.255, 0.795], [-0.5, 0.255, 0.795]]
     piper_orientation_euler = ([0.0, 0.0, -90.0])
     piper_quaternion_np = rot_utils.euler_angles_to_quat(piper_orientation_euler, degrees=True)
     piper_quaternion_tuple = tuple(float(v) for v in piper_quaternion_np)
@@ -56,9 +60,21 @@ def design_scene() -> tuple[dict, list[list[float]], tuple[float]]:
     piper_cfg = PIPER_CFG.copy()
     piper_cfg.prim_path = "/World/DeskOrigin/Piper_Origin.*/Piper_arm"
     piper = Articulation(cfg=piper_cfg)
-
-    # # return the scene information
     scene_entities = {"piper": piper}
+
+    # Cuboid 
+    cfg_cuboid = sim_utils.CuboidCfg(
+        size=(0.1, 0.1, 0.1),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.6, 0.4)),
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+        mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
+        collision_props=sim_utils.CollisionPropertiesCfg(),
+    )
+    cfg_cuboid.func("/World/DeskOrigin/Cuboid", cfg_cuboid, translation=(0.0, 0.0, 0.5))
+    scene_entities["cuboid"] = prim_utils.get_prim_at_path("/World/DeskOrigin/Cuboid")
+
+
+    # return the scene information
     return scene_entities, piper_origins, piper_quaternion_tuple
 
 
@@ -68,6 +84,7 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
     # note: we only do this here for readability. In general, it is better to access the entities directly from
     #   the dictionary. This dictionary is replaced by the InteractiveScene class in the next tutorial.
     robot = entities["piper"]
+    cuboid = entities["cuboid"]
     # Define simulation stepping
     sim_dt = sim.get_physics_dt()
     count = 0
@@ -75,7 +92,7 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
     # Simulation loop
     while simulation_app.is_running():
         # Reset
-        if count % 500 == 0:
+        if count % 5000 == 0:
             # reset counter
             count = 0
             # reset the scene entities
@@ -83,13 +100,12 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
             # we offset the root state by the origin since the states are written in simulation world frame
             # if this is not done, then the robots will be spawned at the (0, 0, 0) of the simulation world
             root_state = robot.data.default_root_state.clone()
-            print(root_state)
             # coordinate transformation
             root_state[:, :3] += origins
             # orientation update
             root_state[:, 3:7] = torch.tensor(orientation, dtype=root_state.dtype, device=root_state.device)
-            # print("plus orientation:", orientation)
-            print(root_state)
+            # print("set orientation:", orientation)
+            # print(root_state)
             robot.write_root_pose_to_sim(root_state[:, :7])
             robot.write_root_velocity_to_sim(root_state[:, 7:])
             # set joint positions with some noise
