@@ -120,12 +120,12 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
     sim_dt = sim.get_physics_dt()
     count = 0
 
-    # Euler angle representation (180, 4.5, -90) in degrees
-    roll  = torch.tensor(math.pi)
-    pitch = torch.tensor(0.07854)
-    yaw   = torch.tensor(-math.pi / 2)
+    # Euler angle representation (13, 0, 0) in degrees
+    roll  = torch.tensor(0.293)
+    pitch = torch.tensor(0.0)
+    yaw   = torch.tensor(0.0)
 
-    (w, x, y, z) = math_utils.quat_from_euler_xyz(roll, pitch, yaw)
+    (w, x, y, z) = math_utils.quat_from_euler_xyz(pitch, roll, yaw)
     camera_orientations = torch.stack([w, x, y, z], dim=0).unsqueeze(0).repeat(2, 1).to(sim.device)
     print("adding camera rot:", camera_orientations)
     print("pre-cam data:", camera.data.quat_w_world)
@@ -161,6 +161,7 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
             # clear internal buffers
             robot.reset()
             print("[INFO]: Resetting robot state...")
+            print("post-cam data:", camera.data.quat_w_world)
         # Apply random action (not applying effort since im not training a model)
         # -- generate random joint efforts
         # efforts = torch.randn_like(robot.data.joint_pos) * 5.0
@@ -178,7 +179,6 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
         cuboid.update(sim_dt)
         robot.update(sim_dt)
         camera.update(sim_dt)
-        print("post-cam data:", camera.data.quat_w_world)
 
         # print information from the sensors
         # print("-------------------------------")
