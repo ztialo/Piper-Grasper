@@ -20,10 +20,18 @@ import isaaclab.sim as sim_utils
 from piper_grasper import DESK_CFG, PIPER_CFG
 import torch
 import numpy as np
+import math
 from isaaclab.sim.converters import MeshConverter
-from isaaclab.assets import Articulation
+from isaaclab.assets import Articulation, RigidObject, RigidObjectCfg
 from isaaclab.sim import SimulationContext
+from isaaclab.sensors import CameraCfg, Camera
+import isaaclab.utils.math as math_utils
 
+
+def euler_to_quat(euler: list[float], degrees: bool = True) -> tuple[float]:
+    quaternion_np = rot_utils.euler_angles_to_quat(euler, degrees=degrees)
+    quaternion_tuple = tuple(float(v) for v in quaternion_np)
+    return quaternion_tuple
 
 
 def design_scene() -> tuple[dict, list[list[float]], tuple[float]]:
@@ -53,8 +61,7 @@ def design_scene() -> tuple[dict, list[list[float]], tuple[float]]:
     # Articulation
     piper_origins = [[0.1, 0.255, 0.795], [-0.5, 0.255, 0.795]]
     piper_orientation_euler = ([0.0, 0.0, -90.0])
-    piper_quaternion_np = rot_utils.euler_angles_to_quat(piper_orientation_euler, degrees=True)
-    piper_quaternion_tuple = tuple(float(v) for v in piper_quaternion_np)
+    piper_quaternion_tuple = euler_to_quat(piper_orientation_euler, degrees=True)
     prim_utils.create_prim("/World/DeskOrigin/Piper_Origin1", "Xform", translation=piper_origins[0])
     prim_utils.create_prim("/World/DeskOrigin/Piper_Origin2", "Xform", translation=piper_origins[1])
     piper_cfg = PIPER_CFG.copy()
@@ -63,16 +70,38 @@ def design_scene() -> tuple[dict, list[list[float]], tuple[float]]:
     scene_entities = {"piper": piper}
 
     # Cuboid 
-    cfg_cuboid = sim_utils.CuboidCfg(
-        size=(0.1, 0.1, 0.1),
-        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.6, 0.4)),
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(),
-        mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
-        collision_props=sim_utils.CollisionPropertiesCfg(),
+    cube_origin = [0.0, 0.0, 0.5]
+    prim_utils.create_prim("/World/DeskOrigin/Cube_origin", "Xform", translation=cube_origin)
+    cube_cfg = RigidObjectCfg(
+        prim_path="/World/DeskOrigin/Cube_origin/Cube",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.05, 0.05, 0.05),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.6, 0.4)),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+        )
     )
-    cfg_cuboid.func("/World/DeskOrigin/Cuboid", cfg_cuboid, translation=(0.0, 0.0, 0.5))
-    scene_entities["cuboid"] = prim_utils.get_prim_at_path("/World/DeskOrigin/Cuboid")
+    # cube_cfg.prim_path = "/World/DeskOrigin/Cuboid"
+    cuboid = RigidObject(cfg=cube_cfg)
+    scene_entities["cuboid"] = cuboid
 
+    # Camera sensors
+    camera_rotation_euler = ([180, 4.5, -90])
+    camera_quaternion_tuple = euler_to_quat(camera_rotation_euler, degrees=True)
+    camera_cfg = CameraCfg(
+        prim_path="/World/DeskOrigin/Piper_Origin.*/Piper_arm/link6/hand_cam/camera_sensor",
+        update_period=0.1,
+        height=480,
+        width=640,
+        data_types=["rgb", "distance_to_image_plane"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
+        ),
+        offset=CameraCfg.OffsetCfg(pos=(0.0, 0.0, 0.0), rot=camera_quaternion_tuple, convention="ros"),
+    )
+    camera = Camera(cfg=camera_cfg)
+    scene_entities["camera"] = camera
 
     # return the scene information
     return scene_entities, piper_origins, piper_quaternion_tuple
@@ -85,14 +114,28 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
     #   the dictionary. This dictionary is replaced by the InteractiveScene class in the next tutorial.
     robot = entities["piper"]
     cuboid = entities["cuboid"]
+    cuboid_offset = torch.tensor((0.0, 0.0, 0.9), device="cuda:0") 
+    camera = entities["camera"]
     # Define simulation stepping
     sim_dt = sim.get_physics_dt()
     count = 0
 
+    # Euler angle representation (180, 4.5, -90) in degrees
+    roll  = torch.tensor(math.pi)
+    pitch = torch.tensor(0.07854)
+    yaw   = torch.tensor(-math.pi / 2)
+
+    (w, x, y, z) = math_utils.quat_from_euler_xyz(roll, pitch, yaw)
+    camera_orientations = torch.stack([w, x, y, z], dim=0).unsqueeze(0).repeat(2, 1).to(sim.device)
+    print("adding camera rot:", camera_orientations)
+    print("pre-cam data:", camera.data.quat_w_world)
+    camera.set_world_poses(None, camera_orientations, convention="world")
+    
+
     # Simulation loop
     while simulation_app.is_running():
         # Reset
-        if count % 5000 == 0:
+        if count % 500 == 0:
             # reset counter
             count = 0
             # reset the scene entities
@@ -100,8 +143,11 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
             # we offset the root state by the origin since the states are written in simulation world frame
             # if this is not done, then the robots will be spawned at the (0, 0, 0) of the simulation world
             root_state = robot.data.default_root_state.clone()
+            cuboid_state = cuboid.data.default_root_state.clone()
             # coordinate transformation
             root_state[:, :3] += origins
+            cuboid_state[:, :3] += cuboid_offset
+            cuboid.write_root_pose_to_sim(cuboid_state[:, :7])
             # orientation update
             root_state[:, 3:7] = torch.tensor(orientation, dtype=root_state.dtype, device=root_state.device)
             # print("set orientation:", orientation)
@@ -122,13 +168,23 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
         # robot.set_joint_effort_target(efforts)
 
         # -- write data to sim
+        cuboid.write_data_to_sim()
         robot.write_data_to_sim()
         # Perform step
         sim.step()
         # Increment counter
         count += 1
         # Update buffers
+        cuboid.update(sim_dt)
         robot.update(sim_dt)
+        camera.update(sim_dt)
+        print("post-cam data:", camera.data.quat_w_world)
+
+        # print information from the sensors
+        # print("-------------------------------")
+        # print(camera)
+        # print("Received shape of rgb   image: ", camera.data.output["rgb"].shape)
+        # print("Received shape of depth image: ", camera.data.output["distance_to_image_plane"].shape)
 
 
 def main():

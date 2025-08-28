@@ -35,6 +35,6 @@ DESK_CFG = MeshConverterCfg(
     usd_dir=os.path.dirname(dest_path),
     usd_file_name=os.path.basename(dest_path),
     make_instanceable=True,
-    collision_approximation="convexDecomposition",
+    collision_approximation="meshSimplification",
     rotation=Quaternion_rotation,
 )
