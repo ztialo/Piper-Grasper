@@ -16,7 +16,7 @@ collision_props = schemas_cfg.CollisionPropertiesCfg(collision_enabled=True)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 mesh_path = os.path.join(script_dir, "..", "..", "..", "assets", "workDesk_v1", "workDesk_v1.stl")
-dest_path = os.path.join(script_dir, "..", "..", "..", "assets", "workDesk_v1")
+dest_path = os.path.join(script_dir, "..", "..", "..", "assets", "workDesk_v1", "workDesk_v1.usd")
 
 # Euler angle representation (0, 0, -90) in degrees
 pitch = torch.tensor(0.0)

@@ -3,7 +3,8 @@ import argparse
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
-parser = argparse.ArgumentParser(description="Tutorial on spawning and interacting with an articulation.")
+parser = argparse.ArgumentParser(description="Setting up scene with piper arm articulations")
+print("Remember to use {--enable_cameras} to run the script")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -59,9 +60,10 @@ def design_scene() -> tuple[dict, list[list[float]], tuple[float]]:
     sim_utils.bind_visual_material("/World/DeskOrigin/Desk", "/World/Looks/DeskMaterial")
 
     # Articulation
-    piper_origins = [[0.1, 0.255, 0.795], [-0.5, 0.255, 0.795]]
+    piper_origins = [[0.15, 0.255, 0.795], [-0.55, 0.255, 0.795]]
     piper_orientation_euler = ([0.0, 0.0, -90.0])
     piper_quaternion_tuple = euler_to_quat(piper_orientation_euler, degrees=True)
+    print("piper quat:", piper_quaternion_tuple)
     prim_utils.create_prim("/World/DeskOrigin/Piper_Origin1", "Xform", translation=piper_origins[0])
     prim_utils.create_prim("/World/DeskOrigin/Piper_Origin2", "Xform", translation=piper_origins[1])
     piper_cfg = PIPER_CFG.copy()
@@ -127,8 +129,8 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
 
     (w, x, y, z) = math_utils.quat_from_euler_xyz(pitch, roll, yaw)
     camera_orientations = torch.stack([w, x, y, z], dim=0).unsqueeze(0).repeat(2, 1).to(sim.device)
-    print("adding camera rot:", camera_orientations)
-    print("pre-cam data:", camera.data.quat_w_world)
+    # print("adding camera rot:", camera_orientations)
+    # print("pre-cam data:", camera.data.quat_w_world)
     camera.set_world_poses(None, camera_orientations, convention="world")
     
 
@@ -161,7 +163,7 @@ def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articula
             # clear internal buffers
             robot.reset()
             print("[INFO]: Resetting robot state...")
-            print("post-cam data:", camera.data.quat_w_world)
+            # print("post-cam data:", camera.data.quat_w_world)
         # Apply random action (not applying effort since im not training a model)
         # -- generate random joint efforts
         # efforts = torch.randn_like(robot.data.joint_pos) * 5.0
