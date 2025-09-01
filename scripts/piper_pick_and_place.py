@@ -40,9 +40,9 @@ from isaaclab.utils import configclass
 from isaaclab.sensors import CameraCfg, Camera
 from isaaclab.utils.math import subtract_frame_transforms
 
-
 from piper_grasper import PIPER_CFG
 from piper_grasper import cube_detection as cube_detect
+from piper_grasper import gripper_control
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -203,8 +203,14 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     sim_dt = sim.get_physics_dt()
     count = 0
 
-    # initialize cv2 variables
+    # initialize pick and place task variables
     ready2pick = False
+    next_pos_flag = False
+    action_flag = False
+    set_lift = False
+    pos_tolerance = 0.005
+    state = "idle"
+    gripper_counter = 0
 
     # Simulation loop
     while simulation_app.is_running():
@@ -217,6 +223,19 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             joint_vel = piper_arm.data.default_joint_vel.clone()
             piper_arm.write_joint_state_to_sim(joint_pos, joint_vel)
             piper_arm.reset()
+            
+            # reset controller
+            diff_ik_controller.reset()
+
+            # randomize target cube pos on desk
+            rand_xy = (torch.rand(scene.num_envs, 2, device=sim.device) - 0.5) * 0.4
+            target_offset = torch.cat([rand_xy, torch.full((scene.num_envs, 1), 0.2, device=sim.device)], dim=-1)
+            cube_state = cube.data.default_root_state.clone()
+            cube_state[:, :3] += target_offset
+            cube.write_root_state_to_sim(cube_state)
+
+            ready2pick = False
+            detections = None
         
         elif count % 50 == 0:
             camera_color_img = desk_cam.data.output['rgb'][0].clone().cpu().numpy()
@@ -230,23 +249,36 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
             if ready2pick is False:
                 if "target" in detections and "goal" in detections:
-                    # ready2pick = True
-                    print(detections)
-                    
-            
-            # Define goals for the arm
-            ee_goals = []
-            ee_goals = torch.tensor(ee_goals, device=sim.device)
+                    ready2pick = True
+                    # print(detections)
 
-            # Track the given command
-            current_goal_idx = 0
-            # Create buffers to store actions
-            ik_commands = torch.zeros(
-                scene.num_envs, diff_ik_controller.action_dim, device=piper_arm.device
-            )  # create for left arm for now
+                    # Define goals for the arm
+                    ee_goals = []
+                    target_pose = [
+                        detections["target"][0]["x_w"],
+                        detections["target"][0]["y_w"],
+                        detections["target"][0]["z_w"],
+                        0.7071, 0.7071,  0.0000, 0.0000  # default orientation
+                        ]
+                    goal_pose = [
+                        detections["target"][0]["x_w"],
+                        detections["target"][0]["y_w"],
+                        detections["target"][0]["z_w"],
+                        0.7071, 0.7071,  0.0000, 0.0000  # default orientation
+                    ]
+                    ee_goals.extend([target_pose, goal_pose])
+                    ee_goals = torch.tensor(ee_goals, device=sim.device)
+
+                    # Track the given command
+                    current_goal_idx = 0
+                    # Create buffers to store actions
+                    ik_commands = torch.zeros(
+                        scene.num_envs, diff_ik_controller.action_dim, device=piper_arm.device
+                    )  # create for left arm for now
+                    ik_commands[:] = ee_goals[current_goal_idx]
+                    next_pos_flag = True
+
             if ready2pick:
-                ik_commands[:] = ee_goals[current_goal_idx]
-
                 # reset actions
                 ik_commands[:] = ee_goals[current_goal_idx]
                 joint_pos_des = joint_pos[
@@ -259,27 +291,91 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
 
         else:
-            # obtain quantities from simulation
-            jacobian = piper_arm.root_physx_view.get_jacobians()[
-                :, ee_jacobi_idx, :, piper_arm_entity_cfg.joint_ids
-            ]
-            ee_pose_w = piper_arm.data.body_pose_w[
-                :, piper_arm_entity_cfg.body_ids[0]
-            ]
-            root_pose_w = piper_arm.data.root_pose_w
-            joint_pos = piper_arm.data.joint_pos[:, piper_arm_entity_cfg.joint_ids]
-            # compute frame in root frame
-            ee_pos_b, ee_quat_b = subtract_frame_transforms(
-                root_pose_w[:, 0:3],
-                root_pose_w[:, 3:7],
-                ee_pose_w[:, 0:3],
-                ee_pose_w[:, 3:7],
-            )
-            # compute the joint commands
-            joint_pos_des = diff_ik_controller.compute(
-                ee_pos_b, ee_quat_b, jacobian, joint_pos
-            )
-        
+            # state machine
+            if state == "idle":
+                gripper_control.open(piper_arm, piper_arm_entity_cfg, sim.device, scene)
+                if next_pos_flag is True:
+                    next_pos_flag = False
+                    state = "to_pose"
+            elif state == "to_pose":
+                # allow arm action to current goal pose
+                action_flag = True
+
+                ee_pose_w = piper_arm.data.body_pose_w[
+                    :, piper_arm_entity_cfg.body_ids[0]
+                ]
+                # for now only the position difference
+                pos_diff = ee_goals[current_goal_idx][:3] - ee_pose_w[:3]
+                pos_err = torch.linalg.norm(pos_diff, dim=-1)
+                pos_ok = pos_err <= pos_tolerance
+
+                if pos_ok:
+                    pos_ok = False
+                    action_flag = False
+                    if current_goal_idx == 0:
+                        state = "pick"
+                    if current_goal_idx == 1:
+                        state = "place"
+            elif state == "pick":
+                # close gripper and lift for small amount
+                gripper_control.close(piper_arm, piper_arm_entity_cfg, sim.device, scene)
+                gripper_counter += 1
+
+                if gripper_counter >= 50:
+                    ee_pose_w = piper_arm.data.body_pose_w[:, piper_arm_entity_cfg.body_ids[0]]  # (N,7)
+                    if set_lift is False:
+                        lift_offset = torch.tensor([0.0, 0.0, 0.02], device=sim.device, dtype=torch.float32)  # 3cm
+                        lift_pos = ee_pose_w[:, :3] + lift_offset
+                        lift_quat = ee_pose_w[:, 3:7]  # keep orientation
+                        lift_pose = torch.cat([lift_pos, lift_quat], dim=-1)  # shape (N,7)
+
+                        ik_commands[:] = lift_pose
+                        diff_ik_controller.set_command(ik_commands)
+                        set_lift = True
+                        action_flag = True
+
+                    pos_diff = lift_pose[:3] - ee_pose_w[:3]
+                    pos_err = torch.linalg.norm(pos_diff, dim=-1)
+                    pos_ok = pos_err <= pos_tolerance
+
+                if pos_ok:
+                    # reset params
+                    pos_ok = False
+                    set_lift = False
+                    gripper_counter = 0
+                    current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
+                    state = "to_pose"
+            elif state == "place":
+                gripper_control.open(piper_arm, piper_arm_entity_cfg, sim.device, scene)
+                gripper_counter += 1
+
+                if gripper_counter >= 50:
+                    gripper_counter = 0
+                    state = "idle"
+                    next_pos_flag = False
+
+            if action_flag:
+                # obtain quantities from simulation
+                jacobian = piper_arm.root_physx_view.get_jacobians()[
+                    :, ee_jacobi_idx, :, piper_arm_entity_cfg.joint_ids
+                ]
+                ee_pose_w = piper_arm.data.body_pose_w[
+                    :, piper_arm_entity_cfg.body_ids[0]
+                ]
+                root_pose_w = piper_arm.data.root_pose_w
+                joint_pos = piper_arm.data.joint_pos[:, piper_arm_entity_cfg.joint_ids]
+                # compute frame in root frame
+                ee_pos_b, ee_quat_b = subtract_frame_transforms(
+                    root_pose_w[:, 0:3],
+                    root_pose_w[:, 3:7],
+                    ee_pose_w[:, 0:3],
+                    ee_pose_w[:, 3:7],
+                )
+                # compute the joint commands
+                joint_pos_des = diff_ik_controller.compute(
+                    ee_pos_b, ee_quat_b, jacobian, joint_pos
+                )
+
         if ready2pick:
             # apply actions
             piper_arm.set_joint_position_target(

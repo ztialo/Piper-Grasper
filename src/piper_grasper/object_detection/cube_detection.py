@@ -90,6 +90,14 @@ def _pixel_to_isaac_coord(px, py):
     wy = py * y_pxl_scaling_factor
     return round(wx, 3), round(wy, 3)
 
+def contour_pixel_to_isaac(contour):
+    pts = contour.reshape(-1, 2)  # ensure shape (N,2)
+    world_pts = []
+    for px, py in pts:
+        wx, wy = _pixel_to_isaac_coord(float(px), float(py))  # scale px→meters
+        wx_i, wy_i = _cv_to_isaac_frame(wx, wy)                 # rotate to Isaac frame
+        world_pts.append((wx_i, wy_i))
+    return world_pts
 
 def _get_world_xy_estimation(bgr_warped, color_ranges=COLOR_RANGES):
     hsv = cv2.cvtColor(bgr_warped, cv2.COLOR_BGR2HSV)
@@ -127,8 +135,9 @@ def _get_world_xy_estimation(bgr_warped, color_ranges=COLOR_RANGES):
                 wy = h - cy
                 px, py = _cv_to_isaac_frame(wx, wy)
                 x_coord, y_coord = _pixel_to_isaac_coord(px, py)
+                contour_w = contour_pixel_to_isaac(poly)
 
-                results[color].append({"x": x_coord, "y": y_coord, "contour": poly})
+                results[color].append({"x": x_coord, "y": y_coord, "contour": contour_w})
 
                 cv2.circle(annotated, (cx, cy), 3, DRAW.get(color, (255,255,255)), -1)
                 cv2.putText(annotated, color, (cx-30, cy-30),
@@ -200,6 +209,7 @@ def detect_multi_color_cubes(rgba, depth, color_ranges=COLOR_RANGES):
                 cv2.circle(annotated, (cx, cy), 3, DRAW.get(color, (255,255,255)), -1)
                 cv2.putText(annotated, color, (cx-30, cy-30),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, DRAW.get(color, (255,255,255)), 2, cv2.LINE_AA)
+
                 x_w = warped_results[color][0]["x"]
                 y_w = warped_results[color][0]["y"]
                 z_raw = _depth_around_centroid(depth, cx, cy, r=5)
@@ -207,7 +217,9 @@ def detect_multi_color_cubes(rgba, depth, color_ranges=COLOR_RANGES):
                 text = f"({x_w}, {y_w}, {z_w})"
                 cv2.putText(annotated, text, (cx-60, cy+50),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, DRAW.get(color, (255,255,255)), 1, cv2.LINE_AA)
-                results[color].append({"x_w": x_w, "y_w": y_w, "z_w": z_w, "contour": poly})
+
+                contour_w = warped_results[color][0]["contour"]
+                results[color].append({"x_w": x_w, "y_w": y_w, "z_w": z_w, "contour": contour_w})
 
         # mark area as taken
         if polys:
