@@ -19,8 +19,9 @@ PIPER_CFG = ArticulationCfg(
             solver_position_iteration_count=8,
             solver_velocity_iteration_count=0
         ),
+        collision_props=sim_utils.CollisionPropertiesCfg(),
         activate_contact_sensors=False,
-    ),      
+    ),
     init_state=ArticulationCfg.InitialStateCfg(
             joint_pos={
                 "joint1": 0.0,
@@ -37,9 +38,15 @@ PIPER_CFG = ArticulationCfg(
     actuators={
         "arm": ImplicitActuatorCfg(
             joint_names_expr=[".*"],
-            effort_limit_sim=200.0,
-            stiffness=1400.0,
-            damping=500.0,
+            effort_limit_sim=2000.0,
+            stiffness=2500.0,
+            damping=210.0,
         ),
     },
 )
+
+""""
+effort_limit_sim=200.0,
+stiffness=1400.0,
+damping=500.0,
+"""

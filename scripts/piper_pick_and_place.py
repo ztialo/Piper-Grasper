@@ -97,7 +97,7 @@ class WorkstationSceneCfg(InteractiveSceneCfg):
             collision_props=sim_utils.CollisionPropertiesCfg(),
         ),
     )
-    cube.init_state.pos = (0.35, 0.23, 0.2)
+    cube.init_state.pos = (0.35, 0.19, 0.2)
 
     # desk camera
     desk_cam = CameraCfg(
@@ -183,6 +183,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             }
         ),
     )
+     # update marker positions
+    pos = np.atleast_2d(np.array([0.31, -0.23, -0.072], dtype=np.float32))  # (1,3)
+    orn = np.atleast_2d(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32))  # (1,4)
+    drop_off_marker.visualize(pos, orn)
 
     # Specify robot-specifc parameters
     piper_arm_entity_cfg = SceneEntityCfg(
@@ -208,6 +212,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     next_pos_flag = False
     action_flag = False
     set_lift = False
+    lowered_flag = False
     pos_tolerance = 0.005
     state = "idle"
     gripper_counter = 0
@@ -215,7 +220,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # Simulation loop
     while simulation_app.is_running():
         # reset
-        if count % 2500 == 0:
+        if count % 5000 == 0:
+            print("[INFO] Resetting scene")
             # reset time
             count = 0
             # reset joint state
@@ -228,19 +234,21 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             diff_ik_controller.reset()
 
             # randomize target cube pos on desk
-            rand_xy = (torch.rand(scene.num_envs, 2, device=sim.device) - 0.5) * 0.4
-            target_offset = torch.cat([rand_xy, torch.full((scene.num_envs, 1), 0.2, device=sim.device)], dim=-1)
-            cube_state = cube.data.default_root_state.clone()
-            cube_state[:, :3] += target_offset
-            cube.write_root_state_to_sim(cube_state)
+            # rand_x = torch.rand(scene.num_envs, 1, device=sim.device) * 0.30 + 0.05         # [0.05, 0.35)
+            # rand_y = (torch.rand(scene.num_envs, 1, device=sim.device) - 0.5) * 0.6         # [-0.3, 0.3)
+            # z = torch.full((scene.num_envs, 1), 0.2, device=sim.device)                # fixed 0.2
+            # target_offset = torch.cat([rand_x, rand_y, z], dim=-1)  # (num_envs, 3)
+            # cube_state = cube.data.default_root_state.clone()
+            # cube_state[:, :3] += target_offset
+            # cube.write_root_state_to_sim(cube_state)
 
             ready2pick = False
             detections = None
+            state = "idle"
         
-        elif count % 50 == 0:
+        elif count % 15 == 0:
             camera_color_img = desk_cam.data.output['rgb'][0].clone().cpu().numpy()
             camera_depth_img = desk_cam.data.output['distance_to_image_plane'][0].clone().cpu().numpy()
-            # bgr_color_data = cv2.cvtColor(camera_color_img, cv2.COLOR_RGB2BGR)
             annotated, detections = cube_detect.detect_multi_color_cubes(camera_color_img, camera_depth_img)
             # print(detections)
             cv2.imshow("desk camera annotated", annotated)
@@ -248,22 +256,22 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             cv2.waitKey(10)
 
             if ready2pick is False:
-                if "target" in detections and "goal" in detections:
+                if detections.get("target") and detections.get("goal"):
                     ready2pick = True
-                    # print(detections)
+                    print(detections)
 
                     # Define goals for the arm
                     ee_goals = []
                     target_pose = [
-                        detections["target"][0]["x_w"],
-                        detections["target"][0]["y_w"],
-                        detections["target"][0]["z_w"],
+                        detections["target"][0]["x_w"]-0.0725, # hard code offset for testing
+                        detections["target"][0]["y_w"]+0.06,
+                        detections["target"][0]["z_w"]+0.015, # offset so gripper not touching object
                         0.7071, 0.7071,  0.0000, 0.0000  # default orientation
                         ]
                     goal_pose = [
-                        detections["target"][0]["x_w"],
-                        detections["target"][0]["y_w"],
-                        detections["target"][0]["z_w"],
+                        detections["goal"][0]["x_w"],
+                        detections["goal"][0]["y_w"],
+                        detections["goal"][0]["z_w"],
                         0.7071, 0.7071,  0.0000, 0.0000  # default orientation
                     ]
                     ee_goals.extend([target_pose, goal_pose])
@@ -276,19 +284,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                         scene.num_envs, diff_ik_controller.action_dim, device=piper_arm.device
                     )  # create for left arm for now
                     ik_commands[:] = ee_goals[current_goal_idx]
+                    diff_ik_controller.set_command(ik_commands)
                     next_pos_flag = True
-
-            if ready2pick:
-                # reset actions
-                ik_commands[:] = ee_goals[current_goal_idx]
-                joint_pos_des = joint_pos[
-                    :, piper_arm_entity_cfg.joint_ids
-                ].clone()
-                # reset controller
-                diff_ik_controller.reset()
-                diff_ik_controller.set_command(ik_commands)
-                # change goal
-                current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
 
         else:
             # state machine
@@ -297,6 +294,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 if next_pos_flag is True:
                     next_pos_flag = False
                     state = "to_pose"
+                    print("[STATE]: idle -> to_pose")
             elif state == "to_pose":
                 # allow arm action to current goal pose
                 action_flag = True
@@ -305,54 +303,88 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     :, piper_arm_entity_cfg.body_ids[0]
                 ]
                 # for now only the position difference
-                pos_diff = ee_goals[current_goal_idx][:3] - ee_pose_w[:3]
+                pos_diff = ee_goals[current_goal_idx, :3] - ee_pose_w[:, :3]
                 pos_err = torch.linalg.norm(pos_diff, dim=-1)
                 pos_ok = pos_err <= pos_tolerance
 
                 if pos_ok:
+                    print(f"    pos_diff: {ee_goals[current_goal_idx, :3]} - {ee_pose_w[:, :3]} = {pos_diff}")
                     pos_ok = False
                     action_flag = False
                     if current_goal_idx == 0:
                         state = "pick"
+                        print("[STATE]: to_pose -> pick")
                     if current_goal_idx == 1:
                         state = "place"
+                        print("[STATE]: to_pose -> place")
             elif state == "pick":
-                # close gripper and lift for small amount
-                gripper_control.close(piper_arm, piper_arm_entity_cfg, sim.device, scene)
-                gripper_counter += 1
+                # lower gripper first
+                if lowered_flag is False:
+                    # ''' temporary debug lines '''
+                    # lowered_flag = True
+                    # ''''''
+                    lower_offset = torch.tensor([0.0, 0.0, -0.005], device=sim.device, dtype=torch.float32)  # 3cm
+                    lower_pos = ee_pose_w[:, :3] + lower_offset
+                    lower_quat = ee_pose_w[:, 3:7]  # keep orientation
+                    lower_pose = torch.cat([lower_pos, lower_quat], dim=-1)  # shape (N,7)
 
-                if gripper_counter >= 50:
-                    ee_pose_w = piper_arm.data.body_pose_w[:, piper_arm_entity_cfg.body_ids[0]]  # (N,7)
-                    if set_lift is False:
-                        lift_offset = torch.tensor([0.0, 0.0, 0.02], device=sim.device, dtype=torch.float32)  # 3cm
-                        lift_pos = ee_pose_w[:, :3] + lift_offset
-                        lift_quat = ee_pose_w[:, 3:7]  # keep orientation
-                        lift_pose = torch.cat([lift_pos, lift_quat], dim=-1)  # shape (N,7)
+                    ik_commands[:] = lower_pose
+                    diff_ik_controller.set_command(ik_commands)
+                    set_lift = True
+                    action_flag = True
 
-                        ik_commands[:] = lift_pose
-                        diff_ik_controller.set_command(ik_commands)
-                        set_lift = True
-                        action_flag = True
-
-                    pos_diff = lift_pose[:3] - ee_pose_w[:3]
+                    pos_diff = lower_pose[:, :3] - ee_pose_w[:, :3]
                     pos_err = torch.linalg.norm(pos_diff, dim=-1)
                     pos_ok = pos_err <= pos_tolerance
 
-                if pos_ok:
-                    # reset params
-                    pos_ok = False
-                    set_lift = False
-                    gripper_counter = 0
-                    current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
-                    state = "to_pose"
+                    if pos_ok:
+                        pos_ok = False
+                        lowered_flag = True
+                        set_lift = False
+                        print("     lowered gripper")
+                else:
+
+                    # close gripper and lift for small amount
+                    gripper_control.close(piper_arm, piper_arm_entity_cfg, sim.device, scene)
+                    gripper_counter += 1
+
+                    if gripper_counter >= 200:
+                        ee_pose_w = piper_arm.data.body_pose_w[:, piper_arm_entity_cfg.body_ids[0]]  # (N,7)
+                        if set_lift is False:
+                            lift_offset = torch.tensor([0.0, 0.0, 0.05], device=sim.device, dtype=torch.float32)  # 3cm
+                            lift_pos = ee_pose_w[:, :3] + lift_offset
+                            lift_quat = ee_pose_w[:, 3:7]  # keep orientation
+                            lift_pose = torch.cat([lift_pos, lift_quat], dim=-1)  # shape (N,7)
+
+                            ik_commands[:] = lift_pose
+                            diff_ik_controller.set_command(ik_commands)
+                            set_lift = True
+                            action_flag = True
+
+                        pos_diff = lift_pose[:, :3] - ee_pose_w[:, :3]
+                        pos_err = torch.linalg.norm(pos_diff, dim=-1)
+                        pos_ok = pos_err <= pos_tolerance
+
+                    if pos_ok:
+                        # reset params
+                        pos_ok = False
+                        set_lift = False
+                        lowered_flag = False
+                        gripper_counter = 0
+                        current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
+                        ik_commands[:] = ee_goals[current_goal_idx]
+                        diff_ik_controller.set_command(ik_commands)
+                        state = "to_pose"
+                        print("[STATE]: pick -> to_pose")
             elif state == "place":
                 gripper_control.open(piper_arm, piper_arm_entity_cfg, sim.device, scene)
                 gripper_counter += 1
 
-                if gripper_counter >= 50:
+                if gripper_counter >= 200:
                     gripper_counter = 0
                     state = "idle"
                     next_pos_flag = False
+                    print("[STATE]: place -> idle")
 
             if action_flag:
                 # obtain quantities from simulation
@@ -376,12 +408,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     ee_pos_b, ee_quat_b, jacobian, joint_pos
                 )
 
-        if ready2pick:
-            # apply actions
-            piper_arm.set_joint_position_target(
-                joint_pos_des, joint_ids=piper_arm_entity_cfg.joint_ids
-            )
-        
+                piper_arm.set_joint_position_target(
+                    joint_pos_des, joint_ids=piper_arm_entity_cfg.joint_ids
+                )
+
         scene.write_data_to_sim()
         # perform step
         sim.step()
@@ -395,10 +425,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             :, piper_arm_entity_cfg.body_ids[0], 0:7
         ]
         
-        # update marker positions
-        pos = np.atleast_2d(np.array([0.31, -0.23, 0.0], dtype=np.float32))  # (1,3)
-        orn = np.atleast_2d(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32))  # (1,4)
-        drop_off_marker.visualize(pos, orn)
         # ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
         # goal_marker.visualize(
         #     ik_commands[:, 0:3] + scene.env_origins, ik_commands[:, 3:7]
@@ -410,7 +436,7 @@ def main():
     sim_cfg = sim_utils.SimulationCfg(dt=0.01, device=args_cli.device)
     sim = sim_utils.SimulationContext(sim_cfg)
     # Set main camera
-    sim.set_camera_view([1.5, 1.5, 1.5], [0.0, 0.0, 0.0])
+    sim.set_camera_view([1, 1, 0.6], [0.0, 0.0, 0.0])
     # Desine scene
     scene_cfg = WorkstationSceneCfg(num_envs=args_cli.num_envs, env_spacing=2.5)
     scene = InteractiveScene(scene_cfg)
@@ -428,3 +454,7 @@ if __name__ == "__main__":
     # close the app
     simulation_app.close()
     cv2.destroyAllWindows()
+
+""" executable command
+    ./isaaclab.sh -p ../Piper-Grasper/scripts/piper_pick_and_place.py --enable_cameras
+"""

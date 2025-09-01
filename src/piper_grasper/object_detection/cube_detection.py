@@ -210,16 +210,17 @@ def detect_multi_color_cubes(rgba, depth, color_ranges=COLOR_RANGES):
                 cv2.putText(annotated, color, (cx-30, cy-30),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, DRAW.get(color, (255,255,255)), 2, cv2.LINE_AA)
 
-                x_w = warped_results[color][0]["x"]
-                y_w = warped_results[color][0]["y"]
-                z_raw = _depth_around_centroid(depth, cx, cy, r=5)
-                z_w = _get_world_z_estimation(z_raw)
-                text = f"({x_w}, {y_w}, {z_w})"
-                cv2.putText(annotated, text, (cx-60, cy+50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, DRAW.get(color, (255,255,255)), 1, cv2.LINE_AA)
+                if warped_results.get(color):
+                    x_w = warped_results[color][0]["x"]
+                    y_w = warped_results[color][0]["y"]
+                    contour_w = warped_results[color][0]["contour"]
+                    z_raw = _depth_around_centroid(depth, cx, cy, r=5)
+                    z_w = _get_world_z_estimation(z_raw)
+                    text = f"({x_w}, {y_w}, {z_w})"
+                    cv2.putText(annotated, text, (cx-60, cy+50),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, DRAW.get(color, (255,255,255)), 1, cv2.LINE_AA)
 
-                contour_w = warped_results[color][0]["contour"]
-                results[color].append({"x_w": x_w, "y_w": y_w, "z_w": z_w, "contour": contour_w})
+                    results[color].append({"x_w": x_w, "y_w": y_w, "z_w": z_w, "contour": contour_w})
 
         # mark area as taken
         if polys:
