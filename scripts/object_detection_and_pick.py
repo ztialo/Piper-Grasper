@@ -25,20 +25,24 @@ simulation_app = app_launcher.app
 
 import torch
 import os
+import numpy as np
+import cv2
 
 import isaaclab.sim as sim_utils
 import isaacsim.core.utils.prims as prim_utils
 from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
 from isaaclab.controllers import DifferentialIKController, DifferentialIKControllerCfg
 from isaaclab.managers import SceneEntityCfg
-from isaaclab.markers import VisualizationMarkers
+from isaaclab.markers import VisualizationMarkers, VisualizationMarkersCfg
 from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.sensors import CameraCfg, Camera
 from isaaclab.utils.math import subtract_frame_transforms
 
+
 from piper_grasper import PIPER_CFG
+from piper_grasper import cube_detection as cube_detect
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -68,13 +72,13 @@ class WorkstationSceneCfg(InteractiveSceneCfg):
                 script_dir, "..", "assets", "workDesk_v1", "workDesk_v1.usd"
             ),
             mass_props=sim_utils.MassPropertiesCfg(density=200.0),
-            # collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
             visual_material=sim_utils.PreviewSurfaceCfg(
                 diffuse_color=(0.6, 0.533, 0.3)
             ),
         ),
     )
-    desk.init_state.pos = (0.255, 0.25, -0.145)
+    desk.init_state.pos = (0.255, 0.2, -0.145)
     desk.init_state.rot = (0.7071068, 0, 0, 0.7071068)   # 90 deg around z-axis
 
     # articulation
@@ -85,13 +89,15 @@ class WorkstationSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Cube",
         spawn=sim_utils.CuboidCfg(
             size=(0.05, 0.05, 0.05),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.6, 0.4)),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(1, 0.0, 0.0),
+                roughness=1.0,),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(),
             mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
             collision_props=sim_utils.CollisionPropertiesCfg(),
         ),
     )
-    cube.init_state.pos = (0.25, 0.23, 0.2)
+    cube.init_state.pos = (0.35, 0.23, 0.2)
 
     # desk camera
     desk_cam = CameraCfg(
@@ -133,13 +139,13 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # Extract scene entities
     piper_arm = scene["piper_arm"]
     # desk = scene["desk"]
-    # cube = scene["cube"]
+    cube = scene["cube"]
     desk_cam = scene["desk_cam"]
     # hand_cam = scene["hand_cam"]
 
     # pose the cameras
     desk_cam.set_world_poses(
-        torch.as_tensor((0.0, 0.0, 0.75), dtype=torch.float32, device=sim.device).unsqueeze(0),
+        torch.as_tensor((0.0, 0.0, 0.72), dtype=torch.float32, device=sim.device).unsqueeze(0),
         torch.as_tensor((0.8435394, 0, 0.5370673, 0),
                         dtype=torch.float32, device=sim.device).unsqueeze(0),
         convention="world"  # (0, 65, 0) in degrees world -> (0, -25, -90) in local frame
@@ -154,83 +160,110 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     )
 
     # Markers
-    frame_marker_cfg = FRAME_MARKER_CFG.copy()
-    frame_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
-    left_ee_marker = VisualizationMarkers(
-        frame_marker_cfg.replace(prim_path="/Visuals/left_ee_current")
+    # frame_marker_cfg = FRAME_MARKER_CFG.copy()
+    # frame_marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
+    # ee_marker = VisualizationMarkers(
+    #     frame_marker_cfg.replace(prim_path="/Visuals/ee_current")
+    # )
+    # goal_marker = VisualizationMarkers(
+    #     frame_marker_cfg.replace(prim_path="/Visuals/ee_goal")
+    # )
+    drop_off_marker = VisualizationMarkers(
+        cfg=VisualizationMarkersCfg(
+            prim_path="/Visuals/drop_off_zone",
+            markers={
+                "cube": sim_utils.CuboidCfg(
+                    size=(0.075, 0.075, 0.075),
+                    visual_material=sim_utils.PreviewSurfaceCfg(
+                        diffuse_color=(0.0, 1.0, 0.0),
+                        emissive_color=(0.0, 0.2, 0.0),
+                        roughness=1.0, # so that the surface don't reflect light for camera
+                    ),
+                )
+            }
+        ),
     )
-    goal_marker = VisualizationMarkers(
-        frame_marker_cfg.replace(prim_path="/Visuals/ee_goal")
-    )
-
-    # Define goals for the arm
-    ee_goals = [
-        [0.35,  0.10, 0.2, 0.6533, 0.6533, -0.2706, 0.2706],
-        [0.35,  0.00, 0.2, 0.6533, 0.6533, -0.2706, 0.2706],
-        [0.25,  0.00, 0.2, 0.7071, 0.7071,  0.0000, 0.0000],
-        [0.30,  0.00, 0.3, 0.5000, 0.5000, -0.5000, 0.5000],
-        [0.40, -0.10, 0.4, 0.7071, 0.0000,  0.0000, 0.7071],
-    ]
-    ee_goals = torch.tensor(ee_goals, device=sim.device)
-
-    # Track the given command
-    current_goal_idx = 0
-    # Create buffers to store actions
-    ik_commands = torch.zeros(
-        scene.num_envs, diff_ik_controller.action_dim, device=piper_arm.device
-    )  # create for left arm for now
-    ik_commands[:] = ee_goals[current_goal_idx]
 
     # Specify robot-specifc parameters
-    # body names = ["arm_base", "link1", "link2", "link3", "link4", "link5", "link6", "link7", "link8"]
     piper_arm_entity_cfg = SceneEntityCfg(
         "piper_arm", joint_names=["joint.*"], body_names=["link8"]
     )
-    # right_piper_entity_cfg = SceneEntityCfg("right_piper", joint_names=["joint.*"], body_names=["link8"])
 
     # Resolving the scene entities
     piper_arm_entity_cfg.resolve(scene)
-    # right_piper_entity_cfg.resolve(scene)
     # Obtain the frame index of the end-effector
     print("Left piper body ids", piper_arm_entity_cfg.body_ids)
     print("Left piper body names", piper_arm_entity_cfg.body_names)
     # piper ee is link 8
-    left_ee_jacobi_idx = (
+    ee_jacobi_idx = (
         piper_arm_entity_cfg.body_ids[0] - 1
     )  # minus 1 because the jacobian does not include the base
-    # right_ee_jacobi_idx = right_piper_entity_cfg.body_ids[0] - 1
 
     # Define simulation stepping
     sim_dt = sim.get_physics_dt()
     count = 0
+
+    # initialize cv2 variables
+    ready2pick = False
+
     # Simulation loop
     while simulation_app.is_running():
         # reset
-        if count % 200 == 0:
+        if count % 2500 == 0:
             # reset time
             count = 0
             # reset joint state
-            left_joint_pos = piper_arm.data.default_joint_pos.clone()
-            left_joint_vel = piper_arm.data.default_joint_vel.clone()
-            piper_arm.write_joint_state_to_sim(left_joint_pos, left_joint_vel)
+            joint_pos = piper_arm.data.default_joint_pos.clone()
+            joint_vel = piper_arm.data.default_joint_vel.clone()
+            piper_arm.write_joint_state_to_sim(joint_pos, joint_vel)
             piper_arm.reset()
+        
+        elif count % 50 == 0:
+            camera_color_img = desk_cam.data.output['rgb'][0].clone().cpu().numpy()
+            camera_depth_img = desk_cam.data.output['distance_to_image_plane'][0].clone().cpu().numpy()
+            # bgr_color_data = cv2.cvtColor(camera_color_img, cv2.COLOR_RGB2BGR)
+            annotated, detections = cube_detect.detect_multi_color_cubes(camera_color_img, camera_depth_img)
+            # print(detections)
+            cv2.imshow("desk camera annotated", annotated)
+            # cv2.imshow("desk camera depth", camera_depth_img)
+            cv2.waitKey(10)
 
-            # reset actions
-            ik_commands[:] = ee_goals[current_goal_idx]
-            left_joint_pos_des = left_joint_pos[
-                :, piper_arm_entity_cfg.joint_ids
-            ].clone()
-            # reset controller
-            diff_ik_controller.reset()
-            diff_ik_controller.set_command(ik_commands)
-            # change goal
-            current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
+            if ready2pick is False:
+                if "target" in detections and "goal" in detections:
+                    # ready2pick = True
+                    print(detections)
+                    
+            
+            # Define goals for the arm
+            ee_goals = []
+            ee_goals = torch.tensor(ee_goals, device=sim.device)
+
+            # Track the given command
+            current_goal_idx = 0
+            # Create buffers to store actions
+            ik_commands = torch.zeros(
+                scene.num_envs, diff_ik_controller.action_dim, device=piper_arm.device
+            )  # create for left arm for now
+            if ready2pick:
+                ik_commands[:] = ee_goals[current_goal_idx]
+
+                # reset actions
+                ik_commands[:] = ee_goals[current_goal_idx]
+                joint_pos_des = joint_pos[
+                    :, piper_arm_entity_cfg.joint_ids
+                ].clone()
+                # reset controller
+                diff_ik_controller.reset()
+                diff_ik_controller.set_command(ik_commands)
+                # change goal
+                current_goal_idx = (current_goal_idx + 1) % len(ee_goals)
+
         else:
             # obtain quantities from simulation
             jacobian = piper_arm.root_physx_view.get_jacobians()[
-                :, left_ee_jacobi_idx, :, piper_arm_entity_cfg.joint_ids
+                :, ee_jacobi_idx, :, piper_arm_entity_cfg.joint_ids
             ]
-            left_ee_pose_w = piper_arm.data.body_pose_w[
+            ee_pose_w = piper_arm.data.body_pose_w[
                 :, piper_arm_entity_cfg.body_ids[0]
             ]
             root_pose_w = piper_arm.data.root_pose_w
@@ -239,18 +272,20 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             ee_pos_b, ee_quat_b = subtract_frame_transforms(
                 root_pose_w[:, 0:3],
                 root_pose_w[:, 3:7],
-                left_ee_pose_w[:, 0:3],
-                left_ee_pose_w[:, 3:7],
+                ee_pose_w[:, 0:3],
+                ee_pose_w[:, 3:7],
             )
             # compute the joint commands
-            left_joint_pos_des = diff_ik_controller.compute(
+            joint_pos_des = diff_ik_controller.compute(
                 ee_pos_b, ee_quat_b, jacobian, joint_pos
             )
-
-        # apply actions
-        piper_arm.set_joint_position_target(
-            left_joint_pos_des, joint_ids=piper_arm_entity_cfg.joint_ids
-        )
+        
+        if ready2pick:
+            # apply actions
+            piper_arm.set_joint_position_target(
+                joint_pos_des, joint_ids=piper_arm_entity_cfg.joint_ids
+            )
+        
         scene.write_data_to_sim()
         # perform step
         sim.step()
@@ -260,16 +295,18 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         scene.update(sim_dt)
 
         # obtain quantitiess from simuation
-        left_ee_pose_w = piper_arm.data.body_state_w[
+        ee_pose_w = piper_arm.data.body_state_w[
             :, piper_arm_entity_cfg.body_ids[0], 0:7
         ]
-        # right_ee_pose_w = right_piper.data.body_state_w[:, right_piper_entity_cfg.body_ids[0], 0:7]
+        
         # update marker positions
-        left_ee_marker.visualize(left_ee_pose_w[:, 0:3], left_ee_pose_w[:, 3:7])
-        # right_ee_marker.visualize(right_ee_pose_w[:, 0:3], right_ee_pose_w[:, 3:7])
-        goal_marker.visualize(
-            ik_commands[:, 0:3] + scene.env_origins, ik_commands[:, 3:7]
-        )
+        pos = np.atleast_2d(np.array([0.31, -0.23, 0.0], dtype=np.float32))  # (1,3)
+        orn = np.atleast_2d(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32))  # (1,4)
+        drop_off_marker.visualize(pos, orn)
+        # ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
+        # goal_marker.visualize(
+        #     ik_commands[:, 0:3] + scene.env_origins, ik_commands[:, 3:7]
+        # )
 
 
 def main():
@@ -294,3 +331,4 @@ if __name__ == "__main__":
     main()
     # close the app
     simulation_app.close()
+    cv2.destroyAllWindows()
