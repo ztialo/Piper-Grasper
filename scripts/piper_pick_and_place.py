@@ -263,8 +263,8 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     # Define goals for the arm
                     ee_goals = []
                     target_pose = [
-                        detections["target"][0]["x_w"]-0.0725, # hard code offset for testing
-                        detections["target"][0]["y_w"]+0.06,
+                        detections["target"][0]["x_w"]-0.03, # hard code offset for testing
+                        detections["target"][0]["y_w"]+0.03,
                         detections["target"][0]["z_w"]+0.015, # offset so gripper not touching object
                         0.7071, 0.7071,  0.0000, 0.0000  # default orientation
                         ]
@@ -351,7 +351,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     if gripper_counter >= 200:
                         ee_pose_w = piper_arm.data.body_pose_w[:, piper_arm_entity_cfg.body_ids[0]]  # (N,7)
                         if set_lift is False:
-                            lift_offset = torch.tensor([0.0, 0.0, 0.05], device=sim.device, dtype=torch.float32)  # 3cm
+                            lift_offset = torch.tensor([0.0, 0.0, 0.00], device=sim.device, dtype=torch.float32)  # 3cm
                             lift_pos = ee_pose_w[:, :3] + lift_offset
                             lift_quat = ee_pose_w[:, 3:7]  # keep orientation
                             lift_pose = torch.cat([lift_pos, lift_quat], dim=-1)  # shape (N,7)
