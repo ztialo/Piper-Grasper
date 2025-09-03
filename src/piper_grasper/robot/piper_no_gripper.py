@@ -5,7 +5,7 @@ from isaaclab.assets.articulation import ArticulationCfg
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 piper_usd_path = os.path.join(
-    script_dir, "..", "..", "..", "assets", "piper_description", "urdf","piper_no_gripper_description", "piper_no_gripper_description.usd")
+    script_dir, "..", "..", "..", "assets", "piper_description", "urdf","piper_description", "piper_description.usd")
 
 PIPER_NO_GRIPPER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(

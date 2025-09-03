@@ -17,7 +17,7 @@ def open(piper_arm, piper_arm_entity_cfg, sim_device, scene):
 
 def close(piper_arm, piper_arm_entity_cfg, sim_device, scene, target_contour=None):
     if target_contour is None:
-        close_values = torch.tensor([0.0, 0.0], device=sim_device, dtype=torch.float32).unsqueeze(0).repeat(scene.num_envs, 1)
+        close_values = torch.tensor([-0.05, 0.0], device=sim_device, dtype=torch.float32).unsqueeze(0).repeat(scene.num_envs, 1)
     else:
         # TODO: using contour shape to help decide how much the gripper should close
         pass

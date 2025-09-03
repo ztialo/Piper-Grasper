@@ -190,7 +190,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
     # Specify robot-specifc parameters
     piper_arm_entity_cfg = SceneEntityCfg(
-        "piper_arm", joint_names=["joint.*"], body_names=["link8"]
+        "piper_arm", joint_names=["joint。*"], body_names=["link[7-8]"]
     )
 
     # Resolving the scene entities
@@ -220,7 +220,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # Simulation loop
     while simulation_app.is_running():
         # reset
-        if count % 5000 == 0:
+        if count % 3000 == 0:
             print("[INFO] Resetting scene")
             # reset time
             count = 0
@@ -231,7 +231,11 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             piper_arm.reset()
             
             # reset controller
+            ik_commands = torch.zeros(
+                scene.num_envs, diff_ik_controller.action_dim, device=piper_arm.device
+            )
             diff_ik_controller.reset()
+            diff_ik_controller.set_command(ik_commands)
 
             # randomize target cube pos on desk
             # rand_x = torch.rand(scene.num_envs, 1, device=sim.device) * 0.30 + 0.05         # [0.05, 0.35)
@@ -244,6 +248,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
             ready2pick = False
             detections = None
+            current_goal_idx = 0
             state = "idle"
         
         elif count % 15 == 0:
@@ -280,9 +285,6 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     # Track the given command
                     current_goal_idx = 0
                     # Create buffers to store actions
-                    ik_commands = torch.zeros(
-                        scene.num_envs, diff_ik_controller.action_dim, device=piper_arm.device
-                    )  # create for left arm for now
                     ik_commands[:] = ee_goals[current_goal_idx]
                     diff_ik_controller.set_command(ik_commands)
                     next_pos_flag = True

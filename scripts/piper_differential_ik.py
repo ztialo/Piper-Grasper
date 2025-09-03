@@ -108,24 +108,24 @@ class WorkstationSceneCfg(InteractiveSceneCfg):
         ),
     )
 
-    # hand camera
-    hand_cam = CameraCfg(
-        prim_path="{ENV_REGEX_NS}/Piper_arm/link6/hand_cam/camera_sensor",
-        update_period=0.1,
-        height=480,
-        width=640,
-        data_types=["rgb", "distance_to_image_plane"],
-        spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0,
-            focus_distance=400.0,
-            horizontal_aperture=20.955,
-            clipping_range=(0.1, 1.0e5),
-        ),
-        offset=CameraCfg.OffsetCfg(
-            pos=(0.03, 0.0, 0.0),
-            rot=(-0.6916548, 0.1470158, 0.1470158, -0.6916548),
-        ),
-    )
+    # # hand camera
+    # hand_cam = CameraCfg(
+    #     prim_path="{ENV_REGEX_NS}/Piper_arm/link6/hand_cam/camera_sensor",
+    #     update_period=0.1,
+    #     height=480,
+    #     width=640,
+    #     data_types=["rgb", "distance_to_image_plane"],
+    #     spawn=sim_utils.PinholeCameraCfg(
+    #         focal_length=24.0,
+    #         focus_distance=400.0,
+    #         horizontal_aperture=20.955,
+    #         clipping_range=(0.1, 1.0e5),
+    #     ),
+    #     offset=CameraCfg.OffsetCfg(
+    #         pos=(0.03, 0.0, 0.0),
+    #         rot=(-0.6916548, 0.1470158, 0.1470158, -0.6916548),
+    #     ),
+    # )
 
 
 def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
@@ -184,7 +184,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # Specify robot-specifc parameters
     # body names = ["arm_base", "link1", "link2", "link3", "link4", "link5", "link6", "link7", "link8"]
     piper_arm_entity_cfg = SceneEntityCfg(
-        "piper_arm", joint_names=["joint.*"], body_names=["link8"]
+        "piper_arm", joint_names=["joint[1-6]"], body_names=["gripper_base"]
     )
     # right_piper_entity_cfg = SceneEntityCfg("right_piper", joint_names=["joint.*"], body_names=["link8"])
 

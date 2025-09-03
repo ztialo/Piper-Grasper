@@ -4,8 +4,11 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
+# piper_usd_path = os.path.join(
+#     script_dir, "..", "..", "..", "assets", "piper_description", "urdf","piper_description_v100_camera", "piper_description_v100_camera.usd")
+
 piper_usd_path = os.path.join(
-    script_dir, "..", "..", "..", "assets", "piper_description", "urdf","piper_description_v100_camera", "piper_description_v100_camera.usd")
+    script_dir, "..", "..", "..", "assets", "piper_description", "urdf","piper_description_v200", "piper_description_v200.usd")
 
 PIPER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
@@ -30,8 +33,8 @@ PIPER_CFG = ArticulationCfg(
                 "joint4": 0.0,
                 "joint5": 0.0,
                 "joint6": 0.0,
-                "joint7": 0.0,
-                "joint8": 0.0,
+                # "joint7": 0.0,
+                # "joint8": 0.0,
             },
             # rot=(0.7071067811865475, 0.0, 0.0, -0.7071067811865475),  # 90 deg around x-axis
     ),
@@ -40,7 +43,7 @@ PIPER_CFG = ArticulationCfg(
             joint_names_expr=[".*"],
             effort_limit_sim=2000.0,
             stiffness=2500.0,
-            damping=210.0,
+            damping=250.0,
         ),
     },
 )
