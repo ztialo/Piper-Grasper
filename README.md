@@ -18,7 +18,6 @@ Three script files show how the project built:
 
 after cloning and cd into the repository, install the python package
 
-    ```bash
     python install -e piper-gripper
 
 ## Script Executable Commands
