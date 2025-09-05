@@ -170,6 +170,11 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         [0.25,  0.00, 0.2, 0.7071, 0.7071,  0.0000, 0.0000],
         [0.30,  0.00, 0.3, 0.5000, 0.5000, -0.5000, 0.5000],
         [0.40, -0.10, 0.4, 0.7071, 0.0000,  0.0000, 0.7071],
+        [0.1, -0.35, 0.2, 0.6533, 0.2706, -0.6533, -0.2706],
+        [0.0, -0.35, 0.2, 0.6533, 0.2706, -0.6533, -0.2706],
+        [0.0, -0.25, 0.2, 0.5000, 0.5000, -0.5000, -0.5000],
+        [-0.0, -0.3, 0.3, 0.7071, 0.0, -0.7071, 0.0],
+        [-0.1, -0.4, 0.4, 1, 0.0, 0.0, 0.0],
     ]
     ee_goals = torch.tensor(ee_goals, device=sim.device)
 
@@ -184,7 +189,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # Specify robot-specifc parameters
     # body names = ["arm_base", "link1", "link2", "link3", "link4", "link5", "link6", "link7", "link8"]
     piper_arm_entity_cfg = SceneEntityCfg(
-        "piper_arm", joint_names=["joint[1-6]"], body_names=["gripper_base"]
+        "piper_arm", joint_names=["joint[1-6]"], body_names=["link8"]
     )
     # right_piper_entity_cfg = SceneEntityCfg("right_piper", joint_names=["joint.*"], body_names=["link8"])
 

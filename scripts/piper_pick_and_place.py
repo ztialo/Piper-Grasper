@@ -190,11 +190,15 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
     # Specify robot-specifc parameters
     piper_arm_entity_cfg = SceneEntityCfg(
-        "piper_arm", joint_names=["joint。*"], body_names=["link[7-8]"]
+        "piper_arm", joint_names=["joint[1-6]"], body_names=["link[8]"]
+    )
+    gripper_entity_cfg = SceneEntityCfg(
+        "piper_arm", joint_names=["joint.*"], body_names=["link[7-8]"]
     )
 
     # Resolving the scene entities
     piper_arm_entity_cfg.resolve(scene)
+    gripper_entity_cfg.resolve(scene)
     # Obtain the frame index of the end-effector
     print("Left piper body ids", piper_arm_entity_cfg.body_ids)
     print("Left piper body names", piper_arm_entity_cfg.body_names)
@@ -220,7 +224,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # Simulation loop
     while simulation_app.is_running():
         # reset
-        if count % 3000 == 0:
+        if count % 2000 == 0:
             print("[INFO] Resetting scene")
             # reset time
             count = 0
@@ -246,6 +250,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             # cube_state[:, :3] += target_offset
             # cube.write_root_state_to_sim(cube_state)
 
+            gripper_control.open(piper_arm, gripper_entity_cfg, sim.device, scene)
             ready2pick = False
             detections = None
             current_goal_idx = 0
@@ -269,10 +274,11 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     ee_goals = []
                     target_pose = [
                         detections["target"][0]["x_w"]-0.03, # hard code offset for testing
-                        detections["target"][0]["y_w"]+0.03,
-                        detections["target"][0]["z_w"]+0.015, # offset so gripper not touching object
+                        detections["target"][0]["y_w"]+0.02,
+                        detections["target"][0]["z_w"]-0.015, # offset so gripper not touching object
                         0.7071, 0.7071,  0.0000, 0.0000  # default orientation
                         ]
+                
                     goal_pose = [
                         detections["goal"][0]["x_w"],
                         detections["goal"][0]["y_w"],
@@ -292,7 +298,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         else:
             # state machine
             if state == "idle":
-                gripper_control.open(piper_arm, piper_arm_entity_cfg, sim.device, scene)
+                # gripper_control.open(piper_arm, piper_arm_entity_cfg, sim.device, scene)
                 if next_pos_flag is True:
                     next_pos_flag = False
                     state = "to_pose"
@@ -347,13 +353,14 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 else:
 
                     # close gripper and lift for small amount
-                    gripper_control.close(piper_arm, piper_arm_entity_cfg, sim.device, scene)
+                    gripper_control.close(piper_arm, gripper_entity_cfg, sim.device, scene)
                     gripper_counter += 1
 
-                    if gripper_counter >= 200:
+                    if gripper_counter >= 100:
+                        print("Gripper counter: ", gripper_counter)
                         ee_pose_w = piper_arm.data.body_pose_w[:, piper_arm_entity_cfg.body_ids[0]]  # (N,7)
                         if set_lift is False:
-                            lift_offset = torch.tensor([0.0, 0.0, 0.00], device=sim.device, dtype=torch.float32)  # 3cm
+                            lift_offset = torch.tensor([0.0, 0.0, 0.05], device=sim.device, dtype=torch.float32)  # 3cm
                             lift_pos = ee_pose_w[:, :3] + lift_offset
                             lift_quat = ee_pose_w[:, 3:7]  # keep orientation
                             lift_pose = torch.cat([lift_pos, lift_quat], dim=-1)  # shape (N,7)
@@ -379,14 +386,16 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                         state = "to_pose"
                         print("[STATE]: pick -> to_pose")
             elif state == "place":
-                gripper_control.open(piper_arm, piper_arm_entity_cfg, sim.device, scene)
+                gripper_control.open(piper_arm, gripper_entity_cfg, sim.device, scene)
                 gripper_counter += 1
 
                 if gripper_counter >= 200:
+                    print("Gripper counter: ", gripper_counter)
                     gripper_counter = 0
                     state = "idle"
                     next_pos_flag = False
                     print("[STATE]: place -> idle")
+                    
 
             if action_flag:
                 # obtain quantities from simulation
