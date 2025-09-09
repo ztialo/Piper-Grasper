@@ -13,6 +13,7 @@ piper_usd_path = os.path.join(
 PIPER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
         usd_path=piper_usd_path,
+        
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=True,
             max_depenetration_velocity=5.0,
