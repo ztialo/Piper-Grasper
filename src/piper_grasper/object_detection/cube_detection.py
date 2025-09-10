@@ -2,8 +2,9 @@ import cv2, numpy as np
 
 # Example color ranges (H in [0..180] for OpenCV)
 COLOR_RANGES = {
-    "target":   [((0, 100, 100), (10,255,255)), ((170, 100, 100), (179, 255, 255))],  # red color
-    "goal": [((35, 80,50), (85,255,255))], # green color
+    "target":   [((0, 100, 100), (10,255,255)), 
+                 ((170, 100, 100), (179, 255, 255))], # red
+    "goal": [((35, 80,50), (85,255,255))], # green
     "blue":  [((90, 80,50), (130,255,255))],
     "yellow":[((20,120,70), (32,255,255))],
     "mint":  [((160, 40, 150),  (175, 100, 255))]
@@ -207,11 +208,15 @@ def detect_multi_color_cubes(rgba, depth, color_ranges=COLOR_RANGES):
             if M["m00"] > 0:
                 cx, cy = int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
                 cv2.circle(annotated, (cx, cy), 3, DRAW.get(color, (255,255,255)), -1)
-                cv2.putText(annotated, color, (cx-30, cy-30),
+                if color == "blue":
+                    type = "target"
+                else: 
+                    type = color
+                cv2.putText(annotated, type, (cx-30, cy-30),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, DRAW.get(color, (255,255,255)), 2, cv2.LINE_AA)
 
                 if warped_results.get(color):
-                    x_w = warped_results[color][0]["x"]
+                    x_w = warped_results[color][0]["x"] # need to change if there are multiple target with the same color
                     y_w = warped_results[color][0]["y"]
                     contour_w = warped_results[color][0]["contour"]
                     z_raw = _depth_around_centroid(depth, cx, cy, r=5)
@@ -220,7 +225,7 @@ def detect_multi_color_cubes(rgba, depth, color_ranges=COLOR_RANGES):
                     cv2.putText(annotated, text, (cx-60, cy+50),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, DRAW.get(color, (255,255,255)), 1, cv2.LINE_AA)
 
-                    results[color].append({"x_w": x_w, "y_w": y_w, "z_w": z_w, "contour": contour_w})
+                    results[type].append({"x_w": x_w, "y_w": y_w, "z_w": z_w, "contour": contour_w})
 
         # mark area as taken
         if polys:

@@ -82,15 +82,17 @@ class WorkstationSceneCfg(InteractiveSceneCfg):
     desk.init_state.pos = (0.255, 0.2, -0.145)
     desk.init_state.rot = (0.7071068, 0, 0, 0.7071068)   # 90 deg around z-axis
 
-    # articulation
-    left_piper_arm = PIPER_CFG.replace(prim_path="{ENV_REGEX_NS}/Piper_arm")
-    left_piper_arm.init_state.pos = (0.0, 0.35, 0.0)
+    # left arm articulation
+    left_piper_arm = PIPER_CFG.replace(prim_path="{ENV_REGEX_NS}/Left_piper")
+    left_piper_arm.init_state.pos = (0.0, 0.32, 0.0)
 
-    # add right piper arm
+    # right arm articulation
+    right_piper_arm = PIPER_CFG.replace(prim_path="{ENV_REGEX_NS}/Right_piper")
+    right_piper_arm.init_state.pos = (0.0, -0.32, 0.0)
 
-    # cube
-    cube = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Cube",
+    # cubes
+    cube_1 = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Cube_1",
         spawn=sim_utils.CuboidCfg(
             size=(0.05, 0.05, 0.05),
             visual_material=sim_utils.PreviewSurfaceCfg(
@@ -101,7 +103,21 @@ class WorkstationSceneCfg(InteractiveSceneCfg):
             collision_props=sim_utils.CollisionPropertiesCfg(),
         ),
     )
-    cube.init_state.pos = (0.35, 0.25, 0.2)
+    cube_1.init_state.pos = (0.32, 0.25, 0.2)
+
+    cube_2 = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Cube_2",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.05, 0.05, 0.05),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.0, 0.0, 1.0),
+                roughness=1.0,),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+            mass_props=sim_utils.MassPropertiesCfg(mass=1.0),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+        ),
+    )
+    cube_2.init_state.pos = (0.44, -0.35, 0.2)
 
     # desk camera
     desk_cam = CameraCfg(
@@ -118,9 +134,27 @@ class WorkstationSceneCfg(InteractiveSceneCfg):
         ),
     )
 
-    # hand camera
-    hand_cam = CameraCfg(
-        prim_path="{ENV_REGEX_NS}/Piper_arm/link6/hand_cam/camera_sensor",
+    # hand cameras
+    hand_cam_left = CameraCfg(
+        prim_path="{ENV_REGEX_NS}/Left_piper/link6/hand_cam/left_camera",
+        update_period=0.1,
+        height=480,
+        width=640,
+        data_types=["rgb", "distance_to_image_plane"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=24.0,
+            focus_distance=400.0,
+            horizontal_aperture=20.955,
+            clipping_range=(0.1, 1.0e5),
+        ),
+        offset=CameraCfg.OffsetCfg(
+            pos=(0.03, 0.0, 0.0),
+            rot=(-0.6916548, 0.1470158, 0.1470158, -0.6916548),
+        ),
+    )
+
+    hand_cam_right = CameraCfg(
+        prim_path="{ENV_REGEX_NS}/Right_piper/link6/hand_cam/right_camera",
         update_period=0.1,
         height=480,
         width=640,
@@ -142,8 +176,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     """Runs the simulation loop"""
     # Extract scene entities
     left_piper_arm = scene["left_piper_arm"]
+    right_piper_arm = scene["right_piper_arm"]
     # desk = scene["desk"]
-    cube = scene["cube"]
+    # cube_1 = scene["cube_1"]
     desk_cam = scene["desk_cam"]
     # hand_cam = scene["hand_cam"]
 
@@ -156,11 +191,18 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     )
     
     # Create controller
-    diff_ik_cfg = DifferentialIKControllerCfg(
+    left_ik_cfg = DifferentialIKControllerCfg(
         command_type="pose", use_relative_mode=False, ik_method="dls"
     )
-    diff_ik_controller = DifferentialIKController(
-        diff_ik_cfg, num_envs=scene.num_envs, device=sim.device
+    left_ik_controller = DifferentialIKController(
+        left_ik_cfg, num_envs=scene.num_envs, device=sim.device
+    )
+
+    right_ik_cfg = DifferentialIKControllerCfg(
+        command_type="pose", use_relative_mode=False, ik_method="dls"
+    )
+    right_ik_controller = DifferentialIKController(
+        right_ik_cfg, num_envs=scene.num_envs, device=sim.device
     )
 
     drop_off_marker = VisualizationMarkers(
@@ -184,23 +226,36 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     drop_off_marker.visualize(pos, orn)
 
     # Specify robot-specifc parameters
+    # piper ee is link 8
     left_piper_arm_entity_cfg = SceneEntityCfg(
         "left_piper_arm", joint_names=["joint[1-6]"], body_names=["link[8]"]
     )
     left_gripper_entity_cfg = SceneEntityCfg(
         "left_piper_arm", joint_names=["joint.*"], body_names=["link[7-8]"]
     )
+    right_piper_arm_entity_cfg = SceneEntityCfg(
+        "right_piper_arm", joint_names=["joint[1-6]"], body_names=["link[8]"]
+    )
+    right_gripper_entity_cfg = SceneEntityCfg(
+        "right_piper_arm", joint_names=["joint.*"], body_names=["link[7-8]"]
+    )
 
     # Resolving the scene entities
     left_piper_arm_entity_cfg.resolve(scene)
     left_gripper_entity_cfg.resolve(scene)
+    right_piper_arm_entity_cfg.resolve(scene)
+    right_gripper_entity_cfg.resolve(scene)
+
     # Obtain the frame index of the end-effector
     print("Left piper body ids", left_piper_arm_entity_cfg.body_ids)
     print("Left piper body names", left_piper_arm_entity_cfg.body_names)
-    # piper ee is link 8
-    ee_jacobi_idx = (
+    
+    left_ee_jacobi_idx = (
         left_piper_arm_entity_cfg.body_ids[0] - 1
     )  # minus 1 because the jacobian does not include the base
+    right_ee_jacobi_idx = (
+        right_piper_arm_entity_cfg.body_ids[0] - 1
+    )
 
     # Define simulation stepping
     sim_dt = sim.get_physics_dt()
@@ -209,12 +264,15 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
     # initialize pick and place task variables
     ready2pick = False
     next_pos_flag = False
-    action_flag = False
+    action_flag_left = False
+    action_flag_right = False
     set_lift = False
     set_lower = False
     lowered_flag = False
     pos_tolerance = 0.0035
     state = "idle"
+    current_arm = "left"
+    cube_counter = 0
     gripper_counter = 0
 
     # Simulation loop
@@ -224,30 +282,32 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             print("[INFO] Resetting scene")
             # reset time
             count = 0
-            # reset joint state
+            # reset joint state (both arms share the same default pos and vel)
             joint_pos = left_piper_arm.data.default_joint_pos.clone()
             joint_vel = left_piper_arm.data.default_joint_vel.clone()
             left_piper_arm.write_joint_state_to_sim(joint_pos, joint_vel)
             left_piper_arm.reset()
+
+            joint_pos = right_piper_arm.data.default_joint_pos.clone()
+            joint_vel = right_piper_arm.data.default_joint_vel.clone()
+            right_piper_arm.write_joint_state_to_sim(joint_pos, joint_vel)
+            right_piper_arm.reset()
             
             # reset controller
-            ik_commands = torch.zeros(
-                scene.num_envs, diff_ik_controller.action_dim, device=left_piper_arm.device
+            ik_commands_left = torch.zeros(
+                scene.num_envs, left_ik_controller.action_dim, device=left_piper_arm.device
+            )
+            ik_commands_right = torch.zeros(
+                scene.num_envs, right_ik_controller.action_dim, device=right_piper_arm.device
             )
 
-            # set default EE pose
-            default_left_ee_pose = [0.25,  0.00, 0.22, 0.5000, 0.5000, -0.5000, 0.5000]
-            default_left_ee_pose = torch.tensor(default_left_ee_pose,
-                                    dtype=ik_commands.dtype,
-                                    device=ik_commands.device)
-            default_left_ee_pose = default_left_ee_pose.unsqueeze(0).repeat(ik_commands.shape[0], 1)
-            # default_left_ee_pose[:, 1] -= 0.35
-
-            diff_ik_controller.reset()
-            diff_ik_controller.set_command(ik_commands)
+            left_ik_controller.reset()
+            left_ik_controller.set_command(ik_commands_left)
+            right_ik_controller.reset()
+            right_ik_controller.set_command(ik_commands_right)
 
             # randomize target cube pos on desk
-            # rand_x = torch.rand(scene.num_envs, 1, device=sim.device) * 0.30 + 0.05         # [0.05, 0.35)
+            # rand_x = torch.rand(scene.num_envs, 1, device=sim.device) * 0.30 + 0.05         # [0.05, 0.32)
             # rand_y = (torch.rand(scene.num_envs, 1, device=sim.device) - 0.5) * 0.6         # [-0.3, 0.3)
             # z = torch.full((scene.num_envs, 1), 0.2, device=sim.device)                # fixed 0.2
             # target_offset = torch.cat([rand_x, rand_y, z], dim=-1)  # (num_envs, 3)
@@ -256,9 +316,11 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
             # cube.write_root_state_to_sim(cube_state)
 
             gripper_control.open(left_piper_arm, left_gripper_entity_cfg, sim.device, scene)
+            gripper_control.open(right_piper_arm, right_gripper_entity_cfg, sim.device, scene)
             ready2pick = False
             detections = None
-            current_goal_idx = 0
+            left_current_goal_idx = 0
+            right_current_goal_idx = 0
             state = "idle"
         
         elif count % 15 == 0:
@@ -276,71 +338,107 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                     print(detections)
 
                     # Define goals for the arm
-                    ee_goals = []
-                    target_pose = [
-                        detections["target"][0]["x_w"]-0.03, # hard code offset for testing
-                        detections["target"][0]["y_w"]+0.0,
-                        detections["target"][0]["z_w"]-0.015, # offset so gripper not touching object
-                        0.7071, 0.7071,  0.0000, 0.0000  # default orientation
-                        ]
-                
+                    left_ee_goals_world = []
+                    right_ee_goals_world = []
+
                     goal_pose = [
                         detections["goal"][0]["x_w"]+0.015,
-                        detections["goal"][0]["y_w"]+0.03,
+                        detections["goal"][0]["y_w"]+0.015,
                         detections["goal"][0]["z_w"],
                         0.7071, 0.7071,  0.0000, 0.0000  # default orientation
                     ]
-                    ee_goals.extend([target_pose, goal_pose])
-                    ee_goals = torch.tensor(ee_goals, device=sim.device)
-                    
 
-                    # convert ee_goals to left arm's local pose
-                    left_ee_goals = ee_goals.clone()
-                    left_ee_goals[:, 1] -= 0.35
-                    # for pose in left_ee_goals:
-                    #     pose[1] -= 0.35  # left piper arm y axis offset
+                    for target in detections["target"]:
+                        target_pose = [
+                            target["x_w"]-0.03, # hard code offset for testing
+                            target["y_w"]+0.0,
+                            target["z_w"]-0.015, # offset so gripper not touching object
+                            0.7071, 0.7071,  0.0000, 0.0000  # default orientation
+                        ]
+
+                        # parse target base on the object's y coordinate (left is positivate y)
+                        if target["y_w"] >= 0.0:
+                            left_ee_goals_world.extend([target_pose, goal_pose])
+                            left_ee_goals_world = torch.tensor(left_ee_goals_world, device=sim.device)
+                            # left_ee_goals[:, 1] -= 0.32
+                        else:
+                            right_ee_goals_world.extend([target_pose, goal_pose])
+                            right_ee_goals_world = torch.tensor(right_ee_goals_world, device=sim.device)
+                            # right_ee_goals[:, 1] += 0.32
+
+                    left_ee_goals_local = left_ee_goals_world.clone()
+                    left_ee_goals_local[:, 1] -= 0.32
+
+                    right_ee_goals_local = right_ee_goals_world.clone()
+                    right_ee_goals_local[:, 1] += 0.32
 
                     # Track the given command
-                    current_goal_idx = 0
-                    # Create buffers to store actions
-                    ik_commands[:] = left_ee_goals[current_goal_idx]
-                    diff_ik_controller.set_command(ik_commands)
-                    next_pos_flag = True
+                    left_current_goal_idx, right_current_goal_idx = 0, 0               
+
+                    print("left_ee_goals: ", left_ee_goals_world)
+                    print("right_ee_goals: ", right_ee_goals_world)
+
 
         else:
             # state machine
             if state == "idle":
-                # gripper_control.open(piper_arm, piper_arm_entity_cfg, sim.device, scene)
+                if ready2pick:
+                    # gripper_control.open(piper_arm, piper_arm_entity_cfg, sim.device, scene)
+                    if current_arm == "left":
+                        if left_ee_goals_world.numel() == 0:
+                            current_arm = "right"
+                        elif left_current_goal_idx > left_ee_goals_world.numel():
+                            current_arm = "right"
+                        else:
+                            next_pos_flag = True
 
-                if next_pos_flag is True:
-                    next_pos_flag = False
-                    state = "to_pose"
-                    print("[STATE]: idle -> to_pose")
+                    if current_arm == "right":
+                        if right_ee_goals_world.numel() == 0:
+                            # home both arms
+                            state = "done"
+                            print("[STATE]: idle -> done")
+                        elif right_current_goal_idx > right_ee_goals_world.numel():
+                            # home both arms
+                            state = "done"
+                            print("[STATE]: idle -> done")
+                        else:
+                            next_pos_flag = True
+
+                    if next_pos_flag is True:
+                        if current_arm == "left":
+                            ik_commands_left[:] = left_ee_goals_local[left_current_goal_idx]
+                            left_ik_controller.set_command(ik_commands_left)
+                        if current_arm == "right":
+                            ik_commands_right[:] = right_ee_goals_local[right_current_goal_idx]
+                            right_ik_controller.set_command(ik_commands_right)
+                        next_pos_flag = False
+                        state = "to_pose"
+                        print("[STATE]: idle -> to_pose")
             elif state == "to_pose":
                 # allow arm action to current goal pose
-                action_flag = True
+                action_flag_left = True
 
                 left_ee_pose_w = left_piper_arm.data.body_pose_w[
                     :, left_piper_arm_entity_cfg.body_ids[0]
                 ]
                 # print("current pose: ", left_ee_pose_w)
-                # print("ee goal pose: ", ee_goals[current_goal_idx, :3])
+                # print("ee goal pose: ", ee_goals[left_current_goal_idx, :3])
 
                 # for now only the position difference
-                pos_diff = ee_goals[current_goal_idx, :3] - left_ee_pose_w[:, :3]
+                pos_diff = left_ee_goals_world[left_current_goal_idx, :3] - left_ee_pose_w[:, :3]
                 pos_err = torch.linalg.norm(pos_diff, dim=-1)
                 print("pos error: ", pos_err)
                 # print()
                 pos_ok = pos_err <= pos_tolerance
 
                 if pos_ok:
-                    print(f"    pos_diff: {left_ee_goals[current_goal_idx, :3]} - {left_ee_pose_w[:, :3]} = {pos_diff}")
+                    print(f"    pos_diff: {left_ee_goals_local[left_current_goal_idx, :3]} - {left_ee_pose_w[:, :3]} = {pos_diff}")
                     pos_ok = False
-                    action_flag = False
-                    if current_goal_idx == 0:
+                    action_flag_left = False
+                    if left_current_goal_idx % 2 == 0:
                         state = "pick"
                         print("[STATE]: to_pose -> pick")
-                    if current_goal_idx == 1:
+                    if left_current_goal_idx % 2 == 1:
                         state = "place"
                         print("[STATE]: to_pose -> place")
             elif state == "pick":
@@ -360,12 +458,12 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                         lower_quat = left_ee_pose_w[:, 3:7]  # keep orientation
                         lower_pose = torch.cat([lower_pos, lower_quat], dim=-1)  # shape (N,7)
                         left_lower_pose = lower_pose.clone()
-                        left_lower_pose[:, 1] -= 0.35 # local y axis offset
+                        left_lower_pose[:, 1] -= 0.32 # local y axis offset
 
-                        ik_commands[:] = left_lower_pose
-                        diff_ik_controller.set_command(ik_commands)
+                        ik_commands_left[:] = left_lower_pose
+                        left_ik_controller.set_command(ik_commands_left)
                         set_lower = True
-                        action_flag = True              
+                        action_flag_left = True              
 
                     print("current pose: ", left_ee_pose_w)
                     print("lower goal pose: ", lower_pose)
@@ -397,12 +495,12 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                             lift_quat = left_ee_pose_w[:, 3:7]  # keep orientation
                             lift_pose = torch.cat([lift_pos, lift_quat], dim=-1)  # shape (N,7)
                             left_lift_pose = lift_pose.clone()
-                            left_lift_pose[:, 1] -= 0.35 # local y axis offset
+                            left_lift_pose[:, 1] -= 0.32 # local y axis offset
 
-                            ik_commands[:] = left_lift_pose
-                            diff_ik_controller.set_command(ik_commands)
+                            ik_commands_left[:] = left_lift_pose
+                            left_ik_controller.set_command(ik_commands_left)
                             set_lift = True
-                            action_flag = True
+                            action_flag_left = True
 
                         pos_diff = lift_pose[:, :3] - left_ee_pose_w[:, :3]
                         pos_err = torch.linalg.norm(pos_diff, dim=-1)
@@ -415,10 +513,10 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                         set_lift = False
                         lowered_flag = False
                         gripper_counter = 0
-                        current_goal_idx = (current_goal_idx + 1) % len(left_ee_goals)
-                        ik_commands[:] = left_ee_goals[current_goal_idx]
-                        diff_ik_controller.set_command(ik_commands)
-                        action_flag = True
+                        left_current_goal_idx += 1
+                        ik_commands_left[:] = left_ee_goals_local[left_current_goal_idx]
+                        left_ik_controller.set_command(ik_commands_left)
+                        action_flag_left = True
                         state = "to_pose"
                         print("[STATE]: pick -> to_pose")
             elif state == "place":
@@ -426,26 +524,21 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 gripper_counter += 1
 
                 if gripper_counter >= 100:
+                    # increase idx for goal counting
+                    if current_arm == "left":
+                        left_current_goal_idx += 1
+                    elif current_arm == "right":
+                        right_current_goal_idx += 1
+                    
                     print("Gripper counter: ", gripper_counter)
                     gripper_counter = 0
-                    # ik_commands[:] = default_left_ee_pose
-                    # diff_ik_controller.set_command(ik_commands)
-                    action_flag = False
+                    action_flag_left = False
                     state = "home"
                     home_state = {}
                     print("[STATE]: place -> home")
                     
             elif state == "home":
                 # reset left arm
-                # print("default_left_ee_pose: ", default_left_ee_pose)
-                # print("current pose: ", left_ee_pose_w)
-
-                # left_ee_pose_w = left_piper_arm.data.body_pose_w[:, left_piper_arm_entity_cfg.body_ids[0]]
-                # pos_diff = default_left_ee_pose[:, :3] - left_ee_pose_w[:, :3]
-                # pos_err = torch.linalg.norm(pos_diff, dim=-1)
-                # pos_ok = pos_err <= pos_tolerance
-
-
                 done, q_cmd = arm_control.home(left_piper_arm, left_piper_arm_entity_cfg, sim, home_state, duration_s=1.5)
                 if q_cmd is not None:
                     print("q_cmd: ", q_cmd)
@@ -453,43 +546,64 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
 
                 if done:
                     state = "idle"
-                    action_flag = False
+                    action_flag_left = False
                     next_pos_flag = False
                     print("[STATE]: home -> idle")
+            elif state == "done":
+                print("\n\n[INFO]: Task done.")
 
-                # print("pos_error: ", pos_err)
-
-                # if pos_ok:
-                #     pos_ok = False
-                #     state = "idle"
-                #     next_pos_flag = False
-                #     action_flag = False
-                #     print("[STATE]: home -> idle")
-
-            if action_flag:
+            if action_flag_left:
+                """ -----------------------Left Arm ---------------------"""
                 # obtain quantities from simulation
-                jacobian = left_piper_arm.root_physx_view.get_jacobians()[
-                    :, ee_jacobi_idx, :, left_piper_arm_entity_cfg.joint_ids
+                left_jacobian = left_piper_arm.root_physx_view.get_jacobians()[
+                    :, left_ee_jacobi_idx, :, left_piper_arm_entity_cfg.joint_ids
                 ]
-                ee_pose_w = left_piper_arm.data.body_pose_w[
+                left_ee_pose_w = left_piper_arm.data.body_pose_w[
                     :, left_piper_arm_entity_cfg.body_ids[0]
                 ]
-                root_pose_w = left_piper_arm.data.root_pose_w
-                joint_pos = left_piper_arm.data.joint_pos[:, left_piper_arm_entity_cfg.joint_ids]
+                left_root_pose_w = left_piper_arm.data.root_pose_w
+                left_joint_pos = left_piper_arm.data.joint_pos[:, left_piper_arm_entity_cfg.joint_ids]
                 # compute frame in root frame
-                ee_pos_b, ee_quat_b = subtract_frame_transforms(
-                    root_pose_w[:, 0:3],
-                    root_pose_w[:, 3:7],
-                    ee_pose_w[:, 0:3],
-                    ee_pose_w[:, 3:7],
+                left_ee_pos_b, left_ee_quat_b = subtract_frame_transforms(
+                    left_root_pose_w[:, 0:3],
+                    left_root_pose_w[:, 3:7],
+                    left_ee_pose_w[:, 0:3],
+                    left_ee_pose_w[:, 3:7],
                 )
                 # compute the joint commands
-                joint_pos_des = diff_ik_controller.compute(
-                    ee_pos_b, ee_quat_b, jacobian, joint_pos
+                left_joint_pos_des = left_ik_controller.compute(
+                    left_ee_pos_b, left_ee_quat_b, left_jacobian, left_joint_pos
                 )
 
                 left_piper_arm.set_joint_position_target(
-                    joint_pos_des, joint_ids=left_piper_arm_entity_cfg.joint_ids
+                    left_joint_pos_des, joint_ids=left_piper_arm_entity_cfg.joint_ids
+                )
+               
+            if action_flag_right:
+                """ -----------------------Right Arm ---------------------"""
+                # obtain quantities from simulation
+                right_jacobian = right_piper_arm.root_physx_view.get_jacobians()[
+                    :, right_ee_jacobi_idx, :, right_piper_arm_entity_cfg.joint_ids
+                ]
+                right_ee_pose_w = right_piper_arm.data.body_pose_w[
+                    :, right_piper_arm_entity_cfg.body_ids[0]
+                ]
+                right_root_pose_w = right_piper_arm.data.root_pose_w
+                right_joint_pos = right_piper_arm.data.joint_pos[:, right_piper_arm_entity_cfg.joint_ids]
+                # compute frame in root frame
+                right_ee_pos_b, right_ee_quat_b = subtract_frame_transforms(
+                    right_root_pose_w[:, 0:3],
+                    right_root_pose_w[:, 3:7],
+                    right_ee_pose_w[:, 0:3],
+                    right_ee_pose_w[:, 3:7],
+                )
+                # compute the joint commands
+                right_joint_pos_des = right_ik_controller.compute(
+                    right_ee_pos_b, right_ee_quat_b, right_jacobian, right_joint_pos
+                )
+
+                right_piper_arm.set_joint_position_target(
+                    right_joint_pos_des, joint_ids=right_piper_arm_entity_cfg.joint_ids
                 )
 
         """ Debug statements"""
@@ -504,13 +618,13 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
         scene.update(sim_dt)
 
         # obtain quantitiess from simuation
-        ee_pose_w = left_piper_arm.data.body_state_w[
+        left_ee_pose_w = left_piper_arm.data.body_state_w[
             :, left_piper_arm_entity_cfg.body_ids[0], 0:7
         ]
         
         # ee_marker.visualize(ee_pose_w[:, 0:3], ee_pose_w[:, 3:7])
         # goal_marker.visualize(
-        #     ik_commands[:, 0:3] + scene.env_origins, ik_commands[:, 3:7]
+        #     ik_commands_left[:, 0:3] + scene.env_origins, ik_commands_left[:, 3:7]
         # )
 
 
