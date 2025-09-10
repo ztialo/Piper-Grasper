@@ -385,19 +385,22 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                 if ready2pick:
                     # gripper_control.open(piper_arm, piper_arm_entity_cfg, sim.device, scene)
                     if current_arm == "left":
-                        if left_ee_goals_world.numel() == 0:
+                        print("left current goal idx: ", left_current_goal_idx, "left_ee_goals_world: ", left_ee_goals_world.shape[0])
+                        print("next_pos_flag: ", next_pos_flag)
+                        if left_ee_goals_world.shape[0] == 0:
                             current_arm = "right"
-                        elif left_current_goal_idx > left_ee_goals_world.numel():
+                        elif left_current_goal_idx > (left_ee_goals_world.shape[0] - 1): # minus 1 because idx start from 0
+                            print("switching to right arm")
                             current_arm = "right"
                         else:
                             next_pos_flag = True
 
                     if current_arm == "right":
-                        if right_ee_goals_world.numel() == 0:
+                        if right_ee_goals_world.shape[0] == 0:
                             # home both arms
                             state = "done"
                             print("[STATE]: idle -> done")
-                        elif right_current_goal_idx > right_ee_goals_world.numel():
+                        elif right_current_goal_idx > (right_ee_goals_world.shape[0] - 1):
                             # home both arms
                             state = "done"
                             print("[STATE]: idle -> done")
@@ -408,7 +411,7 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                         if current_arm == "left":
                             ik_commands_left[:] = left_ee_goals_local[left_current_goal_idx]
                             left_ik_controller.set_command(ik_commands_left)
-                        if current_arm == "right":
+                        elif current_arm == "right":
                             ik_commands_right[:] = right_ee_goals_local[right_current_goal_idx]
                             right_ik_controller.set_command(ik_commands_right)
                         next_pos_flag = False
@@ -490,7 +493,9 @@ def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
                         print("Gripper counter: ", gripper_counter)
                         left_ee_pose_w = left_piper_arm.data.body_pose_w[:, left_piper_arm_entity_cfg.body_ids[0]]  # (N,7)
                         if set_lift is False:
-                            lift_offset = torch.tensor([0.0, 0.0, 0.05], device=sim.device, dtype=torch.float32)  # 3cm
+                            cube_counter += 1
+                            lift_amount = 0.05 * cube_counter
+                            lift_offset = torch.tensor([0.0, 0.0, lift_amount], device=sim.device, dtype=torch.float32)  # 3cm
                             lift_pos = left_ee_pose_w[:, :3] + lift_offset
                             lift_quat = left_ee_pose_w[:, 3:7]  # keep orientation
                             lift_pose = torch.cat([lift_pos, lift_quat], dim=-1)  # shape (N,7)
