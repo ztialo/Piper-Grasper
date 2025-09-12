@@ -11,6 +11,7 @@ Three script files show how the project built:
 - `arm-ariticulation.py` Applying articulation to robot arms, setting up scene and sensors.
 - `piper_differential_ik.py` Differential inverse kinematic applied to the robot articulation, accuracy and different testing end effect coordinate can be tested here.
 - `piper_pick_and_place.py` Using vision sensor's RGB and depth output to estimate the coordinate of target and goal to achieve pick and place task.
+- `two_arms_stacking_cube.py` Offset robot arm from world origin and double the arms. Use state machine to achieve cube stacking task.
 
 **Keywords:** OpenCV, Inverse Kinematic, isaaclab
 
@@ -31,6 +32,19 @@ Inside the IsaacLab file, run the following commands to simulate the relative fi
 - `piper_differential_ik.py`
      ```bash
     ./isaaclab.sh -p ../Piper-Grasper/scripts/piper_differential_ik.py --enable_cameras
+
 - `piper_pick_and_place.py`
     ```bash
     ./isaaclab.sh -p ../Piper-Grasper/scripts/piper_pick_and_place.py --enable_cameras
+
+- `two_arms_stacking_cube.py`
+    ```bash
+    ./isaaclab.sh -p ../Piper-Grasper/scripts/two_arms_stacking_cube.py --enable_cameras
+
+## Current Issues
+
+1. Object detection only estimate the general coordinate and height of the object.
+
+2. Inverse kinematic on Piper arm has accracy deficiency when lifted or lower in Z axis.
+
+3. Robot arms have yet defined reachable space so giving an IK command out of bound could cause inaccuracy.
