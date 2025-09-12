@@ -41,11 +41,18 @@ PIPER_CFG = ArticulationCfg(
     ),
     actuators={
         "arm": ImplicitActuatorCfg(
-            joint_names_expr=[".*"],
+            joint_names_expr=["joint[1-6]"],
             effort_limit_sim=2000.0,
-            stiffness=2500.0,
+            stiffness=1500.0,
             damping=250.0,
         ),
+
+        "gripper": ImplicitActuatorCfg(
+            joint_names_expr=["joint[7-8]"],
+            effort_limit_sim=10000.0,
+            stiffness=20000.0,
+            damping=2000.0,
+        )
     },
 )
 
